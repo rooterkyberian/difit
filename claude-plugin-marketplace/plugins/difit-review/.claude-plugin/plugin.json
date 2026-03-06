@@ -1,0 +1,5 @@
+{
+  "name": "difit-review",
+  "description": "Request human code review via difit. Blocks until review is complete, then returns structured comments to the coding agent.",
+  "version": "1.0.0"
+}

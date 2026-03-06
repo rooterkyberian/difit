@@ -1,0 +1,14 @@
+{
+  "name": "difit-marketplace",
+  "owner": {
+    "name": "difit"
+  },
+  "plugins": [
+    {
+      "name": "difit-review",
+      "source": "./plugins/difit-review",
+      "description": "Request human code review via difit. Blocks until review is complete, then returns comments to the agent.",
+      "version": "1.0.0"
+    }
+  ]
+}
