@@ -52,6 +52,7 @@ export interface DiffResponse {
   requestedBaseCommitish?: string;
   requestedTargetCommitish?: string;
   clearComments?: boolean;
+  reviewMode?: boolean;
   repositoryId?: string;
 }
 

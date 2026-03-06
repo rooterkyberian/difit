@@ -1,4 +1,12 @@
-import { Columns, AlignLeft, Settings, PanelLeftClose, PanelLeft, Keyboard } from 'lucide-react';
+import {
+  Columns,
+  AlignLeft,
+  Settings,
+  PanelLeftClose,
+  PanelLeft,
+  Keyboard,
+  CheckCircle,
+} from 'lucide-react';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 import {
@@ -93,6 +101,7 @@ function App() {
   const [isCommentsListOpen, setIsCommentsListOpen] = useState(false);
   const [isRevisionModalOpen, setIsRevisionModalOpen] = useState(false);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
+  const [reviewSubmitted, setReviewSubmitted] = useState(false);
   const collapsedInitializedRef = useRef(false);
   const diffScrollContainerRef = useRef<HTMLElement | null>(null);
 
@@ -681,6 +690,34 @@ function App() {
     }
   };
 
+  const handleFinishReview = useCallback(async () => {
+    try {
+      // Transform DiffComment to Comment format for server
+      const transformedComments = comments.map((c) => ({
+        id: c.id,
+        file: c.filePath,
+        line:
+          typeof c.position.line === 'number'
+            ? c.position.line
+            : [c.position.line.start, c.position.line.end],
+        body: c.body,
+        timestamp: c.createdAt,
+        codeContent: c.codeSnapshot?.content,
+        side: c.position.side,
+      }));
+      const response = await fetch('/api/finish-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comments: transformedComments }),
+      });
+      if (response.ok) {
+        setReviewSubmitted(true);
+      }
+    } catch (error) {
+      console.error('Failed to finish review:', error);
+    }
+  }, [comments]);
+
   const handleNavigateToComment = (comment: Comment) => {
     if (!diffData) return;
 
@@ -767,6 +804,18 @@ function App() {
       <div className="flex flex-col items-center justify-center h-screen bg-github-bg-primary text-center gap-2">
         <h2 className="text-github-danger text-2xl mb-2">No data</h2>
         <p className="text-github-text-secondary text-base">No diff data available</p>
+      </div>
+    );
+  }
+
+  if (reviewSubmitted) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-github-bg-primary text-center gap-4">
+        <CheckCircle size={48} className="text-green-500" />
+        <h2 className="text-github-text-primary text-2xl">Review Complete</h2>
+        <p className="text-github-text-secondary text-base">
+          Your review comments have been submitted. You can close this tab.
+        </p>
       </div>
     );
   }
@@ -877,6 +926,16 @@ function App() {
                 isMobile ? 'gap-3' : 'gap-4'
               }`}
             >
+              {diffData.reviewMode && (
+                <button
+                  onClick={() => void handleFinishReview()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors"
+                  title="Submit review and send comments to the CLI"
+                >
+                  <CheckCircle size={16} />
+                  Review Complete
+                </button>
+              )}
               {!isMobile && comments.length > 0 && (
                 <CommentsDropdown
                   commentsCount={comments.length}

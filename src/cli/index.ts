@@ -8,6 +8,7 @@ import pkg from '../../package.json' with { type: 'json' };
 import { startServer } from '../server/server.js';
 import { type DiffViewMode } from '../types/diff.js';
 import { DiffMode } from '../types/watch.js';
+import { formatReviewOutput } from '../utils/commentFormatting.js';
 import { DEFAULT_DIFF_VIEW_MODE, normalizeDiffViewMode } from '../utils/diffMode.js';
 
 import {
@@ -58,6 +59,7 @@ interface CliOptions {
   clean?: boolean;
   includeUntracked?: boolean;
   keepAlive?: boolean;
+  review?: boolean;
 }
 
 const program = new Command();
@@ -89,8 +91,19 @@ program
   .option('--clean', 'start with a clean slate by clearing all existing comments')
   .option('--include-untracked', 'automatically include untracked files in diff')
   .option('--keep-alive', 'keep server running even after browser disconnects')
+  .option('--review', 'review mode: block until review is complete, output comments to stdout')
   .action(async (commitish: string, compareWith: string | undefined, options: CliOptions) => {
     try {
+      if (options.review && options.tui) {
+        console.error('Error: --review option cannot be used with --tui');
+        process.exit(1);
+      }
+
+      if (options.review && options.keepAlive) {
+        console.error('Error: --review option cannot be used with --keep-alive');
+        process.exit(1);
+      }
+
       let stdinDiff: string | undefined;
       let stdinReviewLabel = 'diff from stdin';
 
@@ -135,15 +148,25 @@ program
 
       if (stdinDiff) {
         // Start server with stdin diff (including --pr patch)
-        const { url } = await startServer({
+        const { url, waitForReviewComplete } = await startServer({
           stdinDiff,
           preferredPort: options.port,
           host: options.host,
           openBrowser: options.open,
           mode: options.mode,
-          clearComments: options.clean,
+          clearComments: options.clean || options.review,
           keepAlive: options.keepAlive,
+          reviewMode: options.review,
         });
+
+        if (options.review && waitForReviewComplete) {
+          console.error(`difit review server started on ${url}`);
+          console.error(`Reviewing: ${stdinReviewLabel}`);
+          console.error('Waiting for review to complete in browser...');
+          const { comments, incomplete } = await waitForReviewComplete();
+          process.stdout.write(formatReviewOutput(comments, incomplete));
+          process.exit(0);
+        }
 
         console.log(`\n🚀 difit server started on ${url}`);
         console.log(`📋 Reviewing: ${stdinReviewLabel}`);
@@ -216,18 +239,34 @@ program
         process.exit(1);
       }
 
-      const { url, port, isEmpty } = await startServer({
+      const { url, port, isEmpty, waitForReviewComplete } = await startServer({
         targetCommitish,
         baseCommitish,
         preferredPort: options.port,
         host: options.host,
         openBrowser: options.open,
         mode: options.mode,
-        clearComments: options.clean,
+        clearComments: options.clean || options.review,
         keepAlive: options.keepAlive,
+        reviewMode: options.review,
         diffMode: determineDiffMode(targetCommitish, compareWith),
         repoPath,
       });
+
+      if (options.review && waitForReviewComplete) {
+        if (isEmpty) {
+          // No diff, output empty review
+          process.stdout.write('');
+          process.exit(0);
+        }
+        // In review mode, log status to stderr (stdout is for review output)
+        console.error(`difit review server started on ${url}`);
+        console.error(`Reviewing: ${targetCommitish}`);
+        console.error('Waiting for review to complete in browser...');
+        const { comments, incomplete } = await waitForReviewComplete();
+        process.stdout.write(formatReviewOutput(comments, incomplete));
+        process.exit(0);
+      }
 
       console.log(`\n🚀 difit server started on ${url}`);
       console.log(`📋 Reviewing: ${targetCommitish}`);

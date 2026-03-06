@@ -36,6 +36,7 @@ interface ServerOptions {
   ignoreWhitespace?: boolean;
   clearComments?: boolean;
   keepAlive?: boolean;
+  reviewMode?: boolean;
   diffMode?: DiffMode;
   repoPath?: string;
 }
@@ -44,7 +45,13 @@ const GENERATED_STATUS_CACHE_TTL_MS = 60_000;
 
 export async function startServer(
   options: ServerOptions,
-): Promise<{ port: number; url: string; isEmpty?: boolean; server?: Server }> {
+): Promise<{
+  port: number;
+  url: string;
+  isEmpty?: boolean;
+  server?: Server;
+  waitForReviewComplete?: () => Promise<{ comments: Comment[]; incomplete: boolean }>;
+}> {
   const app = express();
   const repositoryPath = resolve(options.repoPath ?? process.cwd());
   const repositoryId = createHash('sha256').update(repositoryPath).digest('hex');
@@ -160,6 +167,7 @@ export async function startServer(
       requestedBaseCommitish,
       requestedTargetCommitish,
       clearComments: options.clearComments,
+      reviewMode: options.reviewMode,
       repositoryId,
     });
   });
@@ -332,6 +340,16 @@ export async function startServer(
   // Store comments for final output
   let finalComments: Comment[] = [];
 
+  // Review mode: promise that resolves when review is complete
+  let resolveReviewComplete:
+    | ((result: { comments: Comment[]; incomplete: boolean }) => void)
+    | null = null;
+  const reviewCompletePromise = options.reviewMode
+    ? new Promise<{ comments: Comment[]; incomplete: boolean }>((resolve) => {
+        resolveReviewComplete = resolve;
+      })
+    : null;
+
   // Parse comments from request body (handles both JSON and text/plain)
   function parseCommentsPayload(body: unknown): Comment[] {
     const payload =
@@ -358,6 +376,32 @@ export async function startServer(
       res.send(output);
     } else {
       res.send('');
+    }
+  });
+
+  // Finish review endpoint - signals that review is complete in --review mode
+  app.post('/api/finish-review', (req, res) => {
+    if (!options.reviewMode) {
+      res.status(400).json({ error: 'Not in review mode' });
+      return;
+    }
+
+    try {
+      // Accept final comments in the same request
+      const comments = parseCommentsPayload(req.body);
+      if (comments.length > 0) {
+        finalComments = comments;
+      }
+      res.json({ success: true });
+
+      // Resolve the review promise after responding
+      if (resolveReviewComplete) {
+        resolveReviewComplete({ comments: finalComments, incomplete: false });
+        resolveReviewComplete = null;
+      }
+    } catch (error) {
+      console.error('Error finishing review:', error);
+      res.status(400).json({ error: 'Invalid request' });
     }
   });
 
@@ -490,7 +534,17 @@ export async function startServer(
     // When client disconnects (tab closed, navigation, etc.)
     req.on('close', () => {
       clearInterval(heartbeatInterval);
-      if (options.keepAlive) {
+      if (options.reviewMode) {
+        // In review mode, browser disconnect means incomplete review
+        // Add a small delay to ensure any pending sendBeacon requests are processed
+        setTimeout(() => {
+          if (resolveReviewComplete) {
+            console.error('WARNING: Review session incomplete - browser disconnected');
+            resolveReviewComplete({ comments: finalComments, incomplete: true });
+            resolveReviewComplete = null;
+          }
+        }, 100);
+      } else if (options.keepAlive) {
         console.log('Client disconnected, but server is staying alive (--keep-alive)');
         console.log('Press Ctrl+C to stop the server');
       } else {
@@ -574,7 +628,16 @@ export async function startServer(
     }
   }
 
-  return { port, url, isEmpty: diffDataCache?.isEmpty || false, server };
+  const waitForReviewComplete = reviewCompletePromise
+    ? async () => {
+        const result = await reviewCompletePromise;
+        await fileWatcher.stop();
+        server.close();
+        return result;
+      }
+    : undefined;
+
+  return { port, url, isEmpty: diffDataCache?.isEmpty || false, server, waitForReviewComplete };
 }
 
 async function startServerWithFallback(

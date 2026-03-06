@@ -73,3 +73,43 @@ export function formatCommentsOutput(comments: Comment[]): string {
     `Total comments: ${comments.length}\n`,
   ].join('\n');
 }
+
+/**
+ * Format comments for AI-optimized stdout output (used by --review mode).
+ * Produces a simple, parseable format without decorative elements.
+ */
+export function formatReviewOutput(comments: Comment[], incomplete: boolean): string {
+  if (incomplete && comments.length === 0) {
+    return '# INCOMPLETE REVIEW - Browser disconnected during review\n';
+  }
+
+  const lines: string[] = [];
+
+  if (incomplete) {
+    lines.push('# INCOMPLETE REVIEW - Browser disconnected during review');
+  }
+
+  for (let i = 0; i < comments.length; i++) {
+    const comment = comments[i];
+    const filePath = comment.file || '<unknown file>';
+    const lineInfo = formatReviewLineInfo(comment.line);
+    lines.push(`${filePath}:${lineInfo}`);
+    lines.push(comment.body);
+
+    if (i < comments.length - 1) {
+      lines.push('');
+    }
+  }
+
+  return lines.join('\n') + '\n';
+}
+
+function formatReviewLineInfo(line: number | number[]): string {
+  if (typeof line === 'number') {
+    return String(line);
+  }
+  if (Array.isArray(line) && line.length === 2) {
+    return `${line[0]}-${line[1]}`;
+  }
+  return '';
+}
