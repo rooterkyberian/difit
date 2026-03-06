@@ -43,9 +43,7 @@ interface ServerOptions {
 
 const GENERATED_STATUS_CACHE_TTL_MS = 60_000;
 
-export async function startServer(
-  options: ServerOptions,
-): Promise<{
+export async function startServer(options: ServerOptions): Promise<{
   port: number;
   url: string;
   isEmpty?: boolean;
